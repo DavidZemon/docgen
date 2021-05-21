@@ -1,5 +1,9 @@
 # Document Generation
 
+DEPRECATED! Use the
+[FindDoxygen](https://cmake.org/cmake/help/latest/module/FindDoxygen.html)
+module introduced in CMake 3.9
+
 This repository provides tools and resources for generating Doxygen
 documentation.
 
