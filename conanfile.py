@@ -7,7 +7,7 @@ from conans import ConanFile, tools
 class DocgenConan(ConanFile):
     name = 'docgen'
     version = tools.load('version.txt').strip()
-    license = '0BSD'
+    license = 'MIT'
     url = 'https://github.com/DavidZemon/docgen.git'
     description = 'Doxygen documentation generation utilities'
     settings = {
