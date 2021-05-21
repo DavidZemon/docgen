@@ -1,0 +1,162 @@
+#!/bin/bash
+
+TF_VERSION="0.3.2"
+
+_tf_usage() {
+cat <<EOF
+
+Bash Test Runner version $TF_VERSION
+
+Copy this file locally and source using:
+
+    source "\$(dirname \$0)/test_functions"
+
+Environment:
+
+    TF_WORKSPACE - temporary folder cleared before each test. Put configs, logs
+                   anything you don't want existing after the test in this
+                   directory.
+
+    TF_COLOR - Set TF_COLOR=1 in the environment to force colorful output. E.g.
+               for automated runs where we aren't running in terminal but want
+               to preserve colors.
+
+Test Function:
+
+    tf_test <function> [prompt]
+
+        function: test to run. Should return 0 or "\$TF_PASS" if test passes,
+                  1 or "\$TF_FAIL" otherwise
+        prompt:   string to introduce the test. If unspecified, use tf_preface
+                  to introduce your test as documented below
+
+        This is the main test function. Run it to introduce and execute your tests
+        E.g.:
+
+            source "\$(dirname \$0)/test_functions"
+            tf_test "true" "script should do a thing"
+            tf_test "false" "script should not do this thing"
+
+        would print:
+
+            script should do a thing 	[PASS]
+            script should not do this thing 	[FAIL]
+            1/2 tests passed
+
+    tf_preface <test introduction>
+
+        This function formats and prints your test introduction. If not using
+        a prompt with tf_test, call this in the beginning of each test function.
+
+        The goal of this function is to let you keep "String describing test"
+        close to the code that actually implements the test.
+
+        Example: this existing block
+
+            mytest() {
+                true
+            }
+            tf_test mytest "Code should do thing"
+
+        Functions identically to this block
+
+            mytest() {
+                tf_preface "Code should do thing"
+                true
+            }
+            tf_test mytest
+
+        Since there could be lots of code between the test definition and
+        execution of the test, this can help organize information in the overall
+        test script.
+
+Exit Code:
+
+    When your script exits, this will print "#/# tests passed" and return the
+    number of tests that failed.
+
+        $ cat test.sh
+        source test_functions
+        tf_test "false" "Test1"
+        tf_test "true" "Test2"
+        tf_test "false" "Test3"
+        $ sh test.sh
+        Test1 	[FAIL]
+        Test2 	[PASS]
+        Test3 	[FAIL]
+        1/3 tests passed
+        $ echo \$?
+        2
+
+EOF
+}
+
+if [ "${BASH_SOURCE[0]}" == "$0" ]; then
+	_tf_usage
+	exit
+fi
+
+# Disposable testing directory
+TF_WORKSPACE="$(mktemp -d)"
+
+_TF_TESTS_TOTAL=0
+_TF_TESTS_PASS=0
+
+# Useful as more intuitive returns
+TF_PASS=0
+TF_FAIL=1
+
+_TFC_RED=
+_TFC_GREEN=
+_TFC_CLEAR=
+if [ -t 1 -o "$TF_COLOR" == 1 ]; then
+	_TFC_RED="\e[31m"
+	_TFC_GREEN="\e[32m"
+	_TFC_CLEAR="\e[0m"
+fi
+
+# Print to custom descriptor so tf_test can direct appropriately
+tf_preface() {
+	echo -ne "$* \t" 1>&3
+}
+
+tf_test() {
+	local func="$1"
+	local prompt="$2"
+	local output=
+
+	# Squash complaint about removing . and ..
+	(cd "$TF_WORKSPACE" && rm -rf * .* 2>/dev/null)
+
+	if [ "$prompt" ]; then
+		tf_preface "$prompt" 3>&1
+	fi
+	# Else the function prints its own prompt using tf_prompt
+	((_TF_TESTS_TOTAL++))
+
+	# I/O Redirection lets us store all func STDOUT/STDERR except a preface call
+	# We want the test title to be printed right away, in call cases.
+	if output="$(eval "$func" 3>&2 2>&1)"; then
+		echo -e "$_TFC_GREEN[PASS]$_TFC_CLEAR"
+		((_TF_TESTS_PASS++))
+		return $TF_PASS
+	else
+		echo -e "$_TFC_RED[FAIL]$_TFC_CLEAR"
+		echo "$output"
+		return $TF_FAIL
+	fi
+}
+
+_tf_exit() {
+	local rcode="$((_TF_TESTS_TOTAL-_TF_TESTS_PASS))"
+
+	echo "$_TF_TESTS_PASS/$_TF_TESTS_TOTAL tests passed"
+	rm -rf "$TF_WORKSPACE"
+
+	# At 256, the return code wraps. In that case, return universal "non-zero" 1 code
+	if [ "$rcode" -le 255 ]; then
+		exit "$rcode"
+	fi
+	exit 1
+}
+trap _tf_exit EXIT

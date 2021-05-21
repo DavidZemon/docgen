@@ -1,0 +1,160 @@
+#!/bin/bash
+
+usage() {
+	cat <<EOF
+$0 [-l] [-r /path] <input markdown> <output>
+$0 [-l] [-r /path] -d <directory>
+
+If <output> is a directory, output file will be named after input, translated to
+lowercase with html extension. E.g:
+
+    $0 MyDoc.md dest/  # installs dest/mydoc.html
+
+And any README will be renamed "index.html"
+
+Add a -r path-to-resources if your document will not be in the same directory
+as ./resources. This is used to generate a relative path to js|css|etc. E.g.
+
+    $0 -r html/doc/resources README.md html/
+
+Will create \`html/index.html\` linking to resources in \`doc/resources\`
+
+Add \`-l\` flag to fix href="" links in the output - if a link would point to
+\`MyDoc.md\`, it will update the link to point at \`mydoc.html\`. Directory
+links (ending in \`/\`) will point to \`/index.html\`.
+
+Using -d <directory> will recursively convert all markdown files to html files
+in the specified directory. Resources folder should be relative to this
+directory. (defaults to <directory>/resources.)
+EOF
+}
+
+SHOWDOWN_OPTS="--tables"
+
+fix_links=
+in_markdown=
+out_html=
+path_rec=
+
+while [ "$1" ]; do
+	if [ "$1" = "-r" ]; then
+		shift
+		path_rec="$1"
+	elif [ "$1" = "-l" ]; then
+		fix_links=1
+	elif [ "$1" = "-d" ]; then
+		shift
+		directory="$1"
+	elif [ -z "$in_markdown" ]; then
+		in_markdown="$1"
+	elif [ -z "$out_html" ]; then
+		out_html="$1"
+	fi
+	shift
+done
+
+# Convert input filename/string to html. E.g. My_Doc.md to my_doc.html
+htmlize() {
+	local input="$1"
+	local output="$(basename "$input" \
+			| tr '[:upper:]' '[:lower:]' \
+			| sed 's/\(\.md\)\?$/.html/')"
+	if [ "$output" = "readme.html" ]; then
+		output="index.html"
+	fi
+	if echo "$input" | grep --quiet "/"; then
+		echo "$(dirname "$input")/$output"
+	else
+		echo "$output"
+	fi
+}
+
+# Convert markdown file to html
+convert() {
+	local in_markdown="$1"
+	local out_html="$2"
+	local path_rec="$3"
+
+	if [ -d "$out_html" ]; then
+		out_html="$out_html/$(htmlize "$(basename "$in_markdown")")"
+	fi
+
+	path_rec="$(realpath "$path_rec" \
+			--relative-to "$(dirname "$out_html")" \
+			--canonicalize-missing)"
+
+	if ! touch "$out_html"; then
+		echo "Unable to create '$out_html'"
+		exit 1
+	fi
+
+	cat <<-EOF > "$out_html"
+	<html>
+	<head>
+	  <meta charset="UTF-8">
+	  <link rel="stylesheet" href="$path_rec/hljs-theme.css">
+	  <link rel="stylesheet" href="$path_rec/custom.css">
+	  <script src="$path_rec/highlight.min.js"></script>
+	  <script>hljs.initHighlightingOnLoad();</script>
+	</head>
+	<body>
+	<div id="dg-wrap"><img id="dg-logo" src="$path_rec/logo.png" />
+	EOF
+
+	showdown makehtml -i "$in_markdown" $SHOWDOWN_OPTS 2>/dev/null >> "$out_html"
+
+	cat <<-EOF >> "$out_html"
+	</div>
+	</body>
+	</html>
+	EOF
+
+	if [ "$fix_links" ]; then
+		grep -o "href=\"[^\"]\+\"" "$out_html" | while read -r link; do
+			target="$(echo "$link" | sed 's/href="\(.*\)"/\1/')"
+			# Escape quotes for re-processing with sed.
+			link="${link//"/\\"}"
+			# Ends in ".md" - something we would have converted to .html
+			if echo "$target" | grep --quiet "\.md$"; then
+				sed -i "s;$link;href=\"$(htmlize "$target")\";" "$out_html"
+			# Ends in "/" - a directory - when viewing local files, browsers
+			# show a directory listing instead of picking up index.html
+			elif echo "$target" | grep --quiet "/$"; then
+				sed -i "s;$link;href=\"${target}index.html\";" "$out_html"
+			# Doesn't end in "/", but is actually a directory
+			elif [ -d "$(dirname "$out_html")/$target" ]; then
+				sed -i "s;$link;href=\"$target/index.html\";" "$out_html"
+			fi
+		done
+	fi
+}
+
+if ! which showdown &>/dev/null; then
+	echo "Missing showdown. Do you need to \`npm install -g showdown\`?"
+	exit 1
+fi
+
+if [ -f "$in_markdown" -a "$out_html" -a -z "$directory" ]; then
+	if [ -z "$path_rec" ]; then
+		if [ -d "$out_html" ]; then
+			path_rec="$out_html/resources"
+		else
+			path_rec="$(dirname "$out_html")/resources"
+		fi
+	fi
+	convert "$in_markdown" "$out_html" "$path_rec"
+elif [ "$directory" ]; then
+	if [ ! -d "$directory" ]; then
+		echo "Option -d expects a valid directory"
+		exit 1
+	fi
+	if [ -z "$path_rec" ]; then
+		path_rec="$directory/resources"
+	fi
+	find "$directory" -name "*.md" | while read md; do
+		convert "$md" "$(dirname "$md")" "$path_rec"
+	done
+else
+	usage
+	exit
+fi

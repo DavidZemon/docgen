@@ -1,0 +1,160 @@
+#!/bin/bash
+
+TEST_DIR="$(realpath "$(dirname "$0")")"
+
+MD2HTML="$TEST_DIR/../md2html"
+if [ ! -x "$MD2HTML" ]; then
+	echo "Missing md2html"
+	exit 1
+fi
+
+if ! source "$TEST_DIR/test_functions"; then
+	echo "Unable to load test library"
+	exit 1
+fi
+
+IN_MARKDOWN="$TF_WORKSPACE/in.md"
+OUT_HTML="$TF_WORKSPACE/in.html"
+
+test_filename_basic() {
+	tf_preface "output filename translate: file.md to file.html"
+	touch "$TF_WORKSPACE/file.md"
+	$MD2HTML "$TF_WORKSPACE/file.md" "$TF_WORKSPACE"
+	test -f "$TF_WORKSPACE/file.html"
+}
+
+test_filename_noext() {
+	tf_preface "output filename translate: File to file.html"
+	touch "$TF_WORKSPACE/File"
+	$MD2HTML "$TF_WORKSPACE/File" "$TF_WORKSPACE"
+	test -f "$TF_WORKSPACE/file.html"
+}
+
+test_filename_readme() {
+	tf_preface "output filename translate: Readme.md to index.html"
+	touch "$TF_WORKSPACE/Readme.md"
+	$MD2HTML "$TF_WORKSPACE/Readme.md" "$TF_WORKSPACE"
+	test -f "$TF_WORKSPACE/index.html"
+}
+
+test_dest_relative() {
+	tf_preface "accepts relative path to destination"
+	touch "$IN_MARKDOWN"
+	cd "$TF_WORKSPACE"
+	$MD2HTML "$IN_MARKDOWN" "."
+	cd -
+	test -f "$OUT_HTML"
+}
+
+test_content_noroot() {
+	tf_preface "expected content produced"
+	cat <<-EOF > "$TF_WORKSPACE/test.html"
+		<html>
+		<head>
+		  <meta charset="UTF-8">
+		  <link rel="stylesheet" href="resources/hljs-theme.css">
+		  <link rel="stylesheet" href="resources/custom.css">
+		  <script src="resources/highlight.min.js"></script>
+		  <script>hljs.initHighlightingOnLoad();</script>
+		</head>
+		<body>
+		<div id="dg-wrap"><img id="dg-logo" src="resources/logo.png" />
+		<h1 id="header">Header</h1></div>
+		</body>
+		</html>
+	EOF
+	echo "# Header" > "$IN_MARKDOWN"
+	$MD2HTML "$IN_MARKDOWN" "$TF_WORKSPACE"
+	diff -U 3 "$TF_WORKSPACE/test.html" "$OUT_HTML"
+}
+
+test_content_relrec() {
+	tf_preface "Generates expected content with relative path to /resources"
+	cat <<-EOF > "$TF_WORKSPACE/test.html"
+		<html>
+		<head>
+		  <meta charset="UTF-8">
+		  <link rel="stylesheet" href="../resources/hljs-theme.css">
+		  <link rel="stylesheet" href="../resources/custom.css">
+		  <script src="../resources/highlight.min.js"></script>
+		  <script>hljs.initHighlightingOnLoad();</script>
+		</head>
+		<body>
+		<div id="dg-wrap"><img id="dg-logo" src="../resources/logo.png" />
+		<h1 id="header">Header</h1></div>
+		</body>
+		</html>
+	EOF
+	echo "# Header" > "$IN_MARKDOWN"
+	mkdir -p "$TF_WORKSPACE/doc"
+	$MD2HTML -r "$TF_WORKSPACE/resources" "$IN_MARKDOWN" "$TF_WORKSPACE/doc"
+	diff -U 3 "$TF_WORKSPACE/test.html" "$TF_WORKSPACE/doc/in.html"
+}
+
+test_content_subrec() {
+	tf_preface "Generates expected content with /resources in a sub-directory"
+	cat <<-EOF > "$TF_WORKSPACE/test.html"
+		<html>
+		<head>
+		  <meta charset="UTF-8">
+		  <link rel="stylesheet" href="doc/resources/hljs-theme.css">
+		  <link rel="stylesheet" href="doc/resources/custom.css">
+		  <script src="doc/resources/highlight.min.js"></script>
+		  <script>hljs.initHighlightingOnLoad();</script>
+		</head>
+		<body>
+		<div id="dg-wrap"><img id="dg-logo" src="doc/resources/logo.png" />
+		<h1 id="header">Header</h1></div>
+		</body>
+		</html>
+	EOF
+	echo "# Header" > "$IN_MARKDOWN"
+	$MD2HTML -r "$TF_WORKSPACE/doc/resources" "$IN_MARKDOWN" "$TF_WORKSPACE"
+	diff -U 3 "$TF_WORKSPACE/test.html" "$OUT_HTML"
+}
+
+test_links() {
+	tf_preface "-l flag fixes links"
+	mkdir --parents "$TF_WORKSPACE/dirmk"
+	cat <<-EOF > "$IN_MARKDOWN"
+		* [Standard Link](standard)
+		* [README Link](subdir/README.md)
+		* <This> link type is not yet supported.
+		* [Directory Link](dir/)
+		* [Detected Dir](dirmk)
+		* Not a README.md link
+	EOF
+	cat <<-EOF > "$TF_WORKSPACE/expected"
+		<html>
+		<head>
+		  <meta charset="UTF-8">
+		  <link rel="stylesheet" href="resources/hljs-theme.css">
+		  <link rel="stylesheet" href="resources/custom.css">
+		  <script src="resources/highlight.min.js"></script>
+		  <script>hljs.initHighlightingOnLoad();</script>
+		</head>
+		<body>
+		<div id="dg-wrap"><img id="dg-logo" src="resources/logo.png" />
+		<ul>
+		<li><a href="standard">Standard Link</a></li>
+		<li><a href="subdir/index.html">README Link</a></li>
+		<li><This> link type is not yet supported.</li>
+		<li><a href="dir/index.html">Directory Link</a></li>
+		<li><a href="dirmk/index.html">Detected Dir</a></li>
+		<li>Not a README.md link</li>
+		</ul></div>
+		</body>
+		</html>
+	EOF
+	$MD2HTML -l "$IN_MARKDOWN" "$TF_WORKSPACE"
+	diff -U 3 "$TF_WORKSPACE/expected" "$OUT_HTML"
+}
+
+tf_test test_filename_basic
+tf_test test_filename_noext
+tf_test test_filename_readme
+tf_test test_dest_relative
+tf_test test_content_noroot
+tf_test test_content_relrec
+tf_test test_content_subrec
+tf_test test_links
