@@ -12,6 +12,7 @@ install:
 	$(CP) resources \
 		Doxyfile.in \
 		DocGenConfig.cmake \
+		DocGen-functions.cmake \
 		$(INSTALL_SHARE)
 	$(CP) resources $(INSTALL_DOC)
 	[ `which showdown` ] && ./md2html README.md $(INSTALL_DOC) ; exit 0
